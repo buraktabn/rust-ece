@@ -2,10 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Allow deprecated GenericArray::from_slice for compatibility with aes-gcm 0.10
+// Silence deprecation warnings from generic-array < 1.0 used by aes-gcm 0.10
+// This will be resolved when upgrading to aes-gcm 0.11+ (currently RC)
 #![allow(deprecated)]
-// Allow dead code when both backends are enabled (OpenSSL takes precedence)
-#![allow(dead_code)]
 
 use crate::{
     crypto::{Cryptographer, EcKeyComponents, LocalKeyPair, RemotePublicKey},
@@ -25,12 +24,16 @@ use rand_core::OsRng;
 use sha2::Sha256;
 use std::{any::Any, fmt};
 
+// Types and methods may appear unused when both backends are enabled,
+// but they're required by the Cryptographer trait implementation
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct RustCryptoRemotePublicKey {
     public_key: PublicKey,
     raw_pub_key: Vec<u8>,
 }
 
+#[allow(dead_code)]
 impl RustCryptoRemotePublicKey {
     fn from_raw(raw: &[u8]) -> Result<Self> {
         let encoded_point = EncodedPoint::from_bytes(raw).map_err(|_| Error::InvalidKeyLength)?;
@@ -58,6 +61,7 @@ impl RemotePublicKey for RustCryptoRemotePublicKey {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct RustCryptoLocalKeyPair {
     secret_key: SecretKey,
@@ -76,6 +80,7 @@ impl fmt::Debug for RustCryptoLocalKeyPair {
     }
 }
 
+#[allow(dead_code)]
 impl RustCryptoLocalKeyPair {
     /// Generate a random local key pair using p256's RNG.
     fn generate_random() -> Result<Self> {
@@ -128,6 +133,7 @@ impl LocalKeyPair for RustCryptoLocalKeyPair {
     }
 }
 
+#[allow(dead_code)]
 pub struct RustCryptoCryptographer;
 
 impl Cryptographer for RustCryptoCryptographer {
