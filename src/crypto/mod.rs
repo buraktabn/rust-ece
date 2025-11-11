@@ -8,8 +8,10 @@ use std::any::Any;
 pub(crate) mod holder;
 #[cfg(feature = "backend-openssl")]
 mod openssl;
+#[cfg(feature = "backend-rustcrypto")]
+mod rustcrypto;
 
-#[cfg(not(feature = "backend-openssl"))]
+#[cfg(not(any(feature = "backend-openssl", feature = "backend-rustcrypto")))]
 pub use holder::{set_boxed_cryptographer, set_cryptographer};
 
 pub trait RemotePublicKey: Send + Sync + 'static {
@@ -165,5 +167,135 @@ mod tests {
     #[test]
     fn test_default_cryptograher() {
         test_cryptographer(super::openssl::OpensslCryptographer);
+    }
+}
+
+#[cfg(all(test, feature = "backend-rustcrypto", not(feature = "backend-openssl")))]
+mod rustcrypto_tests {
+    use super::*;
+
+    #[test]
+    fn test_rustcrypto_cryptographer() {
+        test_cryptographer(super::rustcrypto::RustCryptoCryptographer);
+    }
+}
+
+#[cfg(all(test, feature = "backend-openssl", feature = "backend-rustcrypto"))]
+mod interop_tests {
+    use super::*;
+
+    /// Test that keys exported from OpenSSL can be imported into RustCrypto
+    #[test]
+    fn test_key_export_openssl_to_rustcrypto() {
+        let openssl_crypto = super::openssl::OpensslCryptographer;
+        let rustcrypto_crypto = super::rustcrypto::RustCryptoCryptographer;
+
+        // Generate a key with OpenSSL
+        let openssl_key = openssl_crypto.generate_ephemeral_keypair().unwrap();
+
+        // Export the components
+        let components = openssl_key.raw_components().unwrap();
+        let pub_raw = openssl_key.pub_as_raw().unwrap();
+
+        // Import with RustCrypto
+        let rustcrypto_key = rustcrypto_crypto.import_key_pair(&components).unwrap();
+        let rustcrypto_pub_raw = rustcrypto_key.pub_as_raw().unwrap();
+
+        // Public keys should match
+        assert_eq!(pub_raw, rustcrypto_pub_raw);
+    }
+
+    /// Test that keys exported from RustCrypto can be imported into OpenSSL
+    #[test]
+    fn test_key_export_rustcrypto_to_openssl() {
+        let openssl_crypto = super::openssl::OpensslCryptographer;
+        let rustcrypto_crypto = super::rustcrypto::RustCryptoCryptographer;
+
+        // Generate a key with RustCrypto
+        let rustcrypto_key = rustcrypto_crypto.generate_ephemeral_keypair().unwrap();
+
+        // Export the components
+        let components = rustcrypto_key.raw_components().unwrap();
+        let pub_raw = rustcrypto_key.pub_as_raw().unwrap();
+
+        // Import with OpenSSL
+        let openssl_key = openssl_crypto.import_key_pair(&components).unwrap();
+        let openssl_pub_raw = openssl_key.pub_as_raw().unwrap();
+
+        // Public keys should match
+        assert_eq!(pub_raw, openssl_pub_raw);
+    }
+
+    /// Test that data encrypted with OpenSSL can be decrypted with RustCrypto
+    #[test]
+    fn test_aes_gcm_openssl_encrypt_rustcrypto_decrypt() {
+        let openssl_crypto = super::openssl::OpensslCryptographer;
+        let rustcrypto_crypto = super::rustcrypto::RustCryptoCryptographer;
+
+        let key = b"0123456789abcdef"; // 16 bytes
+        let iv = b"012345678901"; // 12 bytes
+        let plaintext = b"Hello, World! This is a test message.";
+
+        // Encrypt with OpenSSL
+        let ciphertext = openssl_crypto.aes_gcm_128_encrypt(key, iv, plaintext).unwrap();
+
+        // Decrypt with RustCrypto
+        let decrypted = rustcrypto_crypto.aes_gcm_128_decrypt(key, iv, &ciphertext).unwrap();
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    /// Test that data encrypted with RustCrypto can be decrypted with OpenSSL
+    #[test]
+    fn test_aes_gcm_rustcrypto_encrypt_openssl_decrypt() {
+        let openssl_crypto = super::openssl::OpensslCryptographer;
+        let rustcrypto_crypto = super::rustcrypto::RustCryptoCryptographer;
+
+        let key = b"0123456789abcdef"; // 16 bytes
+        let iv = b"012345678901"; // 12 bytes
+        let plaintext = b"Hello, World! This is a test message.";
+
+        // Encrypt with RustCrypto
+        let ciphertext = rustcrypto_crypto.aes_gcm_128_encrypt(key, iv, plaintext).unwrap();
+
+        // Decrypt with OpenSSL
+        let decrypted = openssl_crypto.aes_gcm_128_decrypt(key, iv, &ciphertext).unwrap();
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    /// Test that ECDH shared secrets match between backends
+    #[test]
+    fn test_ecdh_shared_secret_compatibility() {
+        let openssl_crypto = super::openssl::OpensslCryptographer;
+        let rustcrypto_crypto = super::rustcrypto::RustCryptoCryptographer;
+
+        // Generate two keypairs with OpenSSL
+        let openssl_local = openssl_crypto.generate_ephemeral_keypair().unwrap();
+        let openssl_remote = openssl_crypto.generate_ephemeral_keypair().unwrap();
+
+        // Export and import to RustCrypto
+        let rustcrypto_local = rustcrypto_crypto
+            .import_key_pair(&openssl_local.raw_components().unwrap())
+            .unwrap();
+        let rustcrypto_remote = rustcrypto_crypto
+            .import_public_key(&openssl_remote.pub_as_raw().unwrap())
+            .unwrap();
+
+        // Compute shared secret with OpenSSL
+        let openssl_remote_pub = openssl_crypto
+            .import_public_key(&openssl_remote.pub_as_raw().unwrap())
+            .unwrap();
+        let openssl_secret = openssl_crypto
+            .compute_ecdh_secret(&*openssl_remote_pub, &*openssl_local)
+            .unwrap();
+
+        // Compute shared secret with RustCrypto
+        let rustcrypto_secret = rustcrypto_crypto
+            .compute_ecdh_secret(&*rustcrypto_remote, &*rustcrypto_local)
+            .unwrap();
+
+        // Shared secrets should match
+        assert_eq!(openssl_secret, rustcrypto_secret);
     }
 }
