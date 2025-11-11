@@ -2,6 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// Allow deprecated GenericArray::from_slice for compatibility with aes-gcm 0.10
+#![allow(deprecated)]
+// Allow dead code when both backends are enabled (OpenSSL takes precedence)
+#![allow(dead_code)]
+
 use crate::{
     crypto::{Cryptographer, EcKeyComponents, LocalKeyPair, RemotePublicKey},
     error::*,
@@ -20,8 +25,6 @@ use rand_core::OsRng;
 use sha2::Sha256;
 use std::{any::Any, fmt};
 
-const AES_GCM_NONCE_LENGTH: usize = 12;
-
 #[derive(Clone, Debug)]
 pub struct RustCryptoRemotePublicKey {
     public_key: PublicKey,
@@ -30,8 +33,7 @@ pub struct RustCryptoRemotePublicKey {
 
 impl RustCryptoRemotePublicKey {
     fn from_raw(raw: &[u8]) -> Result<Self> {
-        let encoded_point = EncodedPoint::from_bytes(raw)
-            .map_err(|_| Error::InvalidKeyLength)?;
+        let encoded_point = EncodedPoint::from_bytes(raw).map_err(|_| Error::InvalidKeyLength)?;
         let public_key = PublicKey::from_encoded_point(&encoded_point)
             .into_option()
             .ok_or(Error::InvalidKeyLength)?;
@@ -41,7 +43,6 @@ impl RustCryptoRemotePublicKey {
         })
     }
 
-    #[allow(dead_code)]
     pub(crate) fn public_key(&self) -> &PublicKey {
         &self.public_key
     }
@@ -89,8 +90,8 @@ impl RustCryptoLocalKeyPair {
             return Err(Error::InvalidKeyLength);
         }
 
-        let secret_key = SecretKey::from_slice(private_bytes)
-            .map_err(|_| Error::InvalidKeyLength)?;
+        let secret_key =
+            SecretKey::from_slice(private_bytes).map_err(|_| Error::InvalidKeyLength)?;
 
         // Verify the public key component matches
         let derived_public = secret_key.public_key();
@@ -103,7 +104,6 @@ impl RustCryptoLocalKeyPair {
         Ok(RustCryptoLocalKeyPair { secret_key })
     }
 
-    #[allow(dead_code)]
     pub(crate) fn secret_key(&self) -> &SecretKey {
         &self.secret_key
     }
@@ -120,10 +120,7 @@ impl LocalKeyPair for RustCryptoLocalKeyPair {
     fn raw_components(&self) -> Result<EcKeyComponents> {
         let private_key = self.secret_key.to_bytes();
         let public_key = self.pub_as_raw()?;
-        Ok(EcKeyComponents::new(
-            private_key.to_vec(),
-            public_key,
-        ))
+        Ok(EcKeyComponents::new(private_key.to_vec(), public_key))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -175,8 +172,7 @@ impl Cryptographer for RustCryptoCryptographer {
     fn hkdf_sha256(&self, salt: &[u8], secret: &[u8], info: &[u8], len: usize) -> Result<Vec<u8>> {
         let (_, hk) = Hkdf::<Sha256>::extract(Some(salt), secret);
         let mut okm = vec![0u8; len];
-        hk.expand(info, &mut okm)
-            .map_err(|_| Error::CryptoError)?;
+        hk.expand(info, &mut okm).map_err(|_| Error::CryptoError)?;
         Ok(okm)
     }
 
@@ -184,13 +180,12 @@ impl Cryptographer for RustCryptoCryptographer {
         if key.len() != 16 {
             return Err(Error::CryptoError);
         }
-        if iv.len() != AES_GCM_NONCE_LENGTH {
+        if iv.len() != 12 {
             return Err(Error::CryptoError);
         }
 
-        let cipher = Aes128Gcm::new_from_slice(key)
-            .map_err(|_| Error::CryptoError)?;
-        let nonce = Nonce::from_slice(iv); // Using deprecated API for compatibility with aes-gcm 0.10
+        let cipher = Aes128Gcm::new_from_slice(key).map_err(|_| Error::CryptoError)?;
+        let nonce = Nonce::from_slice(iv);
 
         // AES-GCM encrypt returns [ciphertext || tag]
         let ciphertext = cipher
@@ -209,13 +204,12 @@ impl Cryptographer for RustCryptoCryptographer {
         if key.len() != 16 {
             return Err(Error::CryptoError);
         }
-        if iv.len() != AES_GCM_NONCE_LENGTH {
+        if iv.len() != 12 {
             return Err(Error::CryptoError);
         }
 
-        let cipher = Aes128Gcm::new_from_slice(key)
-            .map_err(|_| Error::CryptoError)?;
-        let nonce = Nonce::from_slice(iv); // Using deprecated API for compatibility with aes-gcm 0.10
+        let cipher = Aes128Gcm::new_from_slice(key).map_err(|_| Error::CryptoError)?;
+        let nonce = Nonce::from_slice(iv);
 
         // aes-gcm crate expects [ciphertext || tag] format
         let plaintext = cipher
